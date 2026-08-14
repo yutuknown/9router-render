@@ -1,0 +1,11 @@
+dbs:
+  - path: /app/data/db/data.sqlite
+    replicas:
+      - type: s3
+        bucket: 9router-proxy
+        path: data.sqlite
+        endpoint: https://s3.us-east-005.backblazeb2.com
+        access-key-id: ${B2_ACCESS_KEY_ID}
+        secret-access-key: ${B2_SECRET_ACCESS_KEY}
+        # B2 does not require path-style but some clients prefer it.
+        # We can leave force-path-style omitted or false.
