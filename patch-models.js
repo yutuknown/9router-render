@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getDynamicCatalog } = require('./dynamic-router.js');
+const { getDynamicCatalog, KILO_MODELS, OPENCODE_MODELS } = require('./dynamic-router.js');
 
 const fullCatalog = getDynamicCatalog();
 const catalogJsonStr = JSON.stringify(fullCatalog);
@@ -22,7 +22,7 @@ function walk(dir) {
   return results;
 }
 
-console.log("Applying algorithmic model mapping and routing engine across /app...");
+console.log("Applying clean single-prefix model mapping across /app...");
 const appDir = path.resolve('/app');
 const files = walk(appDir);
 
@@ -33,11 +33,18 @@ for (const f of files) {
     let content = fs.readFileSync(f, 'utf8');
     let modified = false;
 
-    // Pattern 1: Patch Next.js v1/models route handler
+    // Pattern 1: Clean up any existing double-prefixed strings like "kc/kc/" or "kc/oc/"
+    if (content.includes('kc/kc/') || content.includes('kc/oc/')) {
+      console.log(`Cleaning double prefixes in ${f}`);
+      content = content.replace(/kc\/kc\//g, 'kc/').replace(/kc\/oc\//g, 'oc/');
+      modified = true;
+    }
+
+    // Pattern 2: Patch Next.js v1/models route handler with clean catalog
     if (f.includes('api/v1/models') || f.includes('api/v1beta/models') || content.includes('INTERNAL_MODELS_FETCH_HEADER')) {
-      if (!content.includes('__ALGORITHMIC_CATALOG_INJECTED__')) {
-        console.log(`Injecting algorithmic catalog into route handler: ${f}`);
-        const injectCode = `;const __ALGO_CATALOG__ = ${catalogJsonStr}; const __seen = new Set(data.map(x=>x.id)); for(const __m of __ALGO_CATALOG__){if(!__seen.has(__m.id)){data.push(__m);}}; /* __ALGORITHMIC_CATALOG_INJECTED__ */`;
+      if (!content.includes('__CLEAN_ALGO_CATALOG__')) {
+        console.log(`Injecting clean catalog into route handler: ${f}`);
+        const injectCode = `;const __CLEAN_CATALOG__ = ${catalogJsonStr}; const __seen = new Set(data.map(x=>x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/'))); data = data.map(x=>({...x, id: x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/')})).filter(x=>!x.id.startsWith('kc/oc/')); for(const __m of __CLEAN_CATALOG__){if(!__seen.has(__m.id)){data.push(__m);}}; /* __CLEAN_ALGO_CATALOG__ */`;
         if (content.includes('object:"list",data:')) {
           content = content.replace(/(object:\s*["']list["'],\s*data:\s*)([a-zA-Z0-9_$]+)/g, (match, prefix, varName) => {
             return `${prefix}((()=>{ let data = ${varName}; ${injectCode} return data; })())`;
@@ -52,11 +59,11 @@ for (const f of files) {
       }
     }
 
-    // Pattern 2: Patch static model arrays in provider registry
-    if (content.includes('kc/anthropic/claude-sonnet-4-20250514') || content.includes('deepseek/deepseek-reasoner')) {
-      if (!content.includes('oc/laguna-s-2.1-free')) {
+    // Pattern 3: Clean providerModels.js or registry files
+    if (content.includes('anthropic/claude-sonnet-4-20250514') || content.includes('deepseek/deepseek-reasoner')) {
+      if (!content.includes('stepfun/step-3.7-flash:free')) {
         console.log(`Patching provider model catalog in: ${f}`);
-        const extraArrayStr = fullCatalog.map(m => `,{id:"${m.id}",name:"${m.id}",object:"model",owned_by:"${m.owned_by}",tier:"${m.tier}",is_free:${m.is_free},pricing:${JSON.stringify(m.pricing)},capabilities:${JSON.stringify(m.capabilities)},context_length:${m.context_length},max_completion_tokens:${m.max_completion_tokens}}`).join('');
+        const extraArrayStr = KILO_MODELS.map(m => `,{id:"${m.id}",name:"${m.name}",object:"model",owned_by:"kc",tier:"${m.tier}",is_free:${m.tier === 'free'},capabilities:{vision:${!!m.vision},tools:true,reasoning:${!!m.reasoning}},context_length:${m.context || 200000},max_completion_tokens:64000}`).join('');
         content = content.replace(/\{[^}]*id:["'][^"']*deepseek-reasoner["'][^}]*\}/g, (match) => match + extraArrayStr);
         modified = true;
       }
@@ -72,4 +79,4 @@ for (const f of files) {
   }
 }
 
-console.log(`Algorithmic catalog patch complete. Patched ${patchedCount} files.`);
+console.log(`Clean patch complete. Patched ${patchedCount} files.`);
