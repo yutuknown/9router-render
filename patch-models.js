@@ -1,9 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { getDynamicCatalog, KILO_MODELS, OPENCODE_MODELS } = require('./dynamic-router.js');
-
-const fullCatalog = getDynamicCatalog();
-const catalogJsonStr = JSON.stringify(fullCatalog);
+const { DEFAULT_BASELINE_MODELS, FREE_ROUTER_EXTENSIONS, formatModel } = require('./dynamic-router.js');
 
 function walk(dir) {
   let results = [];
@@ -22,9 +19,27 @@ function walk(dir) {
   return results;
 }
 
-console.log("Applying clean single-prefix model mapping across /app...");
+console.log("Applying smart dynamic aggregator across /app...");
 const appDir = path.resolve('/app');
 const files = walk(appDir);
+
+// Build initial catalog
+const initialCatalog = [];
+const seen = new Set();
+for (const m of DEFAULT_BASELINE_MODELS.kc) {
+  const f = formatModel('kc', m);
+  if (!seen.has(f.id)) { seen.add(f.id); initialCatalog.push(f); }
+}
+for (const m of FREE_ROUTER_EXTENSIONS.kc) {
+  const f = formatModel('kc', m);
+  if (!seen.has(f.id)) { seen.add(f.id); initialCatalog.push(f); }
+}
+for (const m of FREE_ROUTER_EXTENSIONS.oc) {
+  const f = formatModel('oc', m);
+  if (!seen.has(f.id)) { seen.add(f.id); initialCatalog.push(f); }
+}
+
+const catalogJsonStr = JSON.stringify(initialCatalog);
 
 let patchedCount = 0;
 
@@ -33,18 +48,17 @@ for (const f of files) {
     let content = fs.readFileSync(f, 'utf8');
     let modified = false;
 
-    // Pattern 1: Clean up any existing double-prefixed strings like "kc/kc/" or "kc/oc/"
+    // Clean up any double prefixes
     if (content.includes('kc/kc/') || content.includes('kc/oc/')) {
-      console.log(`Cleaning double prefixes in ${f}`);
       content = content.replace(/kc\/kc\//g, 'kc/').replace(/kc\/oc\//g, 'oc/');
       modified = true;
     }
 
-    // Pattern 2: Patch Next.js v1/models route handler with clean catalog
+    // Patch Next.js v1/models route handler to dynamically aggregate models
     if (f.includes('api/v1/models') || f.includes('api/v1beta/models') || content.includes('INTERNAL_MODELS_FETCH_HEADER')) {
-      if (!content.includes('__CLEAN_ALGO_CATALOG__')) {
-        console.log(`Injecting clean catalog into route handler: ${f}`);
-        const injectCode = `;const __CLEAN_CATALOG__ = ${catalogJsonStr}; const __seen = new Set(data.map(x=>x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/'))); data = data.map(x=>({...x, id: x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/')})).filter(x=>!x.id.startsWith('kc/oc/')); for(const __m of __CLEAN_CATALOG__){if(!__seen.has(__m.id)){data.push(__m);}}; /* __CLEAN_ALGO_CATALOG__ */`;
+      if (!content.includes('__SMART_DYNAMIC_ENGINE_INJECTED__')) {
+        console.log(`Injecting smart dynamic engine into route handler: ${f}`);
+        const injectCode = `;const __SMART_BASE__ = ${catalogJsonStr}; const __seen = new Set(data.map(x=>x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/'))); data = data.map(x=>({...x, id: x.id.replace(/^kc\\/kc\\//,'kc/').replace(/^kc\\/oc\\//,'oc/')})).filter(x=>!x.id.startsWith('kc/oc/')); for(const __m of __SMART_BASE__){if(!__seen.has(__m.id)){data.push(__m);}}; /* __SMART_DYNAMIC_ENGINE_INJECTED__ */`;
         if (content.includes('object:"list",data:')) {
           content = content.replace(/(object:\s*["']list["'],\s*data:\s*)([a-zA-Z0-9_$]+)/g, (match, prefix, varName) => {
             return `${prefix}((()=>{ let data = ${varName}; ${injectCode} return data; })())`;
@@ -59,11 +73,11 @@ for (const f of files) {
       }
     }
 
-    // Pattern 3: Clean providerModels.js or registry files
+    // Patch provider models registry
     if (content.includes('anthropic/claude-sonnet-4-20250514') || content.includes('deepseek/deepseek-reasoner')) {
       if (!content.includes('stepfun/step-3.7-flash:free')) {
         console.log(`Patching provider model catalog in: ${f}`);
-        const extraArrayStr = KILO_MODELS.map(m => `,{id:"${m.id}",name:"${m.name}",object:"model",owned_by:"kc",tier:"${m.tier}",is_free:${m.tier === 'free'},capabilities:{vision:${!!m.vision},tools:true,reasoning:${!!m.reasoning}},context_length:${m.context || 200000},max_completion_tokens:64000}`).join('');
+        const extraArrayStr = FREE_ROUTER_EXTENSIONS.kc.map(m => `,{id:"${m.id}",name:"${m.name}",object:"model",owned_by:"kc",tier:"${m.tier}",is_free:${m.tier === 'free'},capabilities:{vision:false,tools:true,reasoning:${!!m.reasoning}},context_length:200000,max_completion_tokens:64000}`).join('');
         content = content.replace(/\{[^}]*id:["'][^"']*deepseek-reasoner["'][^}]*\}/g, (match) => match + extraArrayStr);
         modified = true;
       }
@@ -79,4 +93,4 @@ for (const f of files) {
   }
 }
 
-console.log(`Clean patch complete. Patched ${patchedCount} files.`);
+console.log(`Smart dynamic engine patch complete. Patched ${patchedCount} files.`);
