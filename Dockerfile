@@ -24,5 +24,6 @@ RUN mkdir -p /app/data/db && chown -R 1000:1000 /app/data /etc/litestream.yml /u
 # Switch to non-root user for security (and Render compliance)
 USER 1000
 
-# Override the default command to use our script
-CMD ["/usr/local/bin/entrypoint.sh"]
+# Override the base image's ENTRYPOINT to bypass their su-exec logic
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD []
