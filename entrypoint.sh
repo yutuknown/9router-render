@@ -8,7 +8,8 @@ echo "Starting Litestream initialization..."
 litestream restore -if-replica-exists /app/data/db/data.sqlite || true
 
 echo "Running model definitions patch..."
-node /usr/local/bin/patch-models.js || true
+cd /usr/local/bin && node patch-models.js || true
+cd /app
 
 echo "Starting Litestream replication and 9Router..."
 # Run litestream replication in the background, and use -exec to start the node server directly
