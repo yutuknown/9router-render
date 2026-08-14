@@ -1,7 +1,17 @@
 const fs = require('fs');
 const path = require('path');
 
-const modelsToAdd = [
+const ALL_MODELS = [
+  // Standard Kilo Code Models
+  { id: "kc/anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+  { id: "kc/anthropic/claude-opus-4-20250514", name: "Claude Opus 4" },
+  { id: "kc/google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+  { id: "kc/google/gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+  { id: "kc/openai/gpt-4.1", name: "GPT-4.1" },
+  { id: "kc/openai/o3", name: "o3" },
+  { id: "kc/deepseek/deepseek-chat", name: "DeepSeek Chat" },
+  { id: "kc/deepseek/deepseek-reasoner", name: "DeepSeek Reasoner" },
+
   // Kilo Code Free Models
   { id: "kc/kilo-auto/free", name: "Auto Free" },
   { id: "kc/openrouter/free", name: "OpenRouter Free Models Router" },
@@ -44,23 +54,54 @@ function walk(dir) {
   return results;
 }
 
-console.log("Searching files in /app to patch model definitions...");
+console.log("Searching and patching model definitions across /app...");
 const appDir = path.resolve('/app');
 const files = walk(appDir);
 
 let patchedCount = 0;
+
+const modelsJsonStr = JSON.stringify(ALL_MODELS.map(m => ({
+  id: m.id,
+  object: "model",
+  owned_by: m.id.split('/')[0],
+  capabilities: { vision: true, tools: true, reasoning: true },
+  context_length: 200000,
+  max_completion_tokens: 64000
+})));
 
 for (const f of files) {
   try {
     let content = fs.readFileSync(f, 'utf8');
     let modified = false;
 
-    // Pattern 1: Files with kc/deepseek/deepseek-reasoner in model arrays
-    if (content.includes('kc/deepseek/deepseek-reasoner') && !content.includes('oc/laguna-s-2.1-free')) {
-      console.log(`Patching model array in ${f}`);
-      const extraArrayStr = modelsToAdd.map(m => `,{id:"${m.id}",name:"${m.name}",object:"model",owned_by:"${m.id.split('/')[0]}",capabilities:{vision:true,tools:true,reasoning:true},context_length:200000,max_completion_tokens:64000}`).join('');
-      content = content.replace(/\{[^}]*id:["']kc\/deepseek\/deepseek-reasoner["'][^}]*\}/g, (match) => match + extraArrayStr);
-      modified = true;
+    // Pattern 1: Patch Next.js v1/models route handler to inject ALL_MODELS before returning
+    if (f.includes('api/v1/models') || f.includes('api/v1beta/models') || content.includes('INTERNAL_MODELS_FETCH_HEADER')) {
+      if (!content.includes('__ALL_MODELS_INJECTED__')) {
+        console.log(`Injecting full model list into route handler: ${f}`);
+        const injectCode = `;const __EXTRA_MODELS__ = ${modelsJsonStr}; const __seen = new Set(data.map(x=>x.id)); for(const __m of __EXTRA_MODELS__){if(!__seen.has(__m.id)){data.push(__m);}}; /* __ALL_MODELS_INJECTED__ */`;
+        // Inject right before returning json({ object: "list", data: ... })
+        if (content.includes('object:"list",data:')) {
+          content = content.replace(/(object:\s*["']list["'],\s*data:\s*)([a-zA-Z0-9_$]+)/g, (match, prefix, varName) => {
+            return `${prefix}((()=>{ let data = ${varName}; ${injectCode} return data; })())`;
+          });
+          modified = true;
+        } else if (content.includes('object: "list", data:')) {
+          content = content.replace(/(object:\s*["']list["'],\s*data:\s*)([a-zA-Z0-9_$]+)/g, (match, prefix, varName) => {
+            return `${prefix}((()=>{ let data = ${varName}; ${injectCode} return data; })())`;
+          });
+          modified = true;
+        }
+      }
+    }
+
+    // Pattern 2: Patch static model arrays in provider registry
+    if (content.includes('kc/anthropic/claude-sonnet-4-20250514') || content.includes('deepseek/deepseek-reasoner')) {
+      if (!content.includes('oc/laguna-s-2.1-free')) {
+        console.log(`Patching provider model catalog in: ${f}`);
+        const extraArrayStr = ALL_MODELS.map(m => `,{id:"${m.id}",name:"${m.name}",object:"model",owned_by:"${m.id.split('/')[0]}",capabilities:{vision:true,tools:true,reasoning:true},context_length:200000,max_completion_tokens:64000}`).join('');
+        content = content.replace(/\{[^}]*id:["'][^"']*deepseek-reasoner["'][^}]*\}/g, (match) => match + extraArrayStr);
+        modified = true;
+      }
     }
 
     if (modified) {
